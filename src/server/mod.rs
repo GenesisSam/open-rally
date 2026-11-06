@@ -10,7 +10,7 @@ use std::time::Duration;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::{delete, get, post};
 use axum::Router;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::auth::{RateLimiter, SessionStore};
 use crate::db::Db;
@@ -22,6 +22,8 @@ pub struct Inner {
     pub sessions: SessionStore,
     pub limiter: RateLimiter,
     pub events: broadcast::Sender<String>,
+    /// 서버를 끌 때 true 가 된다. 열린 WebSocket 이 이걸 보고 닫는다.
+    pub shutdown: watch::Sender<bool>,
     ids: Mutex<ulid::Generator>,
 }
 
@@ -37,6 +39,7 @@ impl AppState {
             sessions: SessionStore::new(),
             limiter: RateLimiter::new(5, Duration::from_secs(10)),
             events: ws::event_channel(),
+            shutdown: watch::channel(false).0,
             ids: Mutex::new(ulid::Generator::new()),
         }))
     }
@@ -65,6 +68,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/posts", get(routes::list_posts).post(routes::create_post))
         .route("/api/posts/{id}", delete(routes::delete_post))
         .route("/files/{id}/{name}", get(routes::serve_file))
+        .route("/ws", get(ws::ws_handler))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::require_session,
@@ -73,4 +77,152 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(middleware::check_host))
         .layer(DefaultBodyLimit::disable())
         .with_state(state)
+}
+
+// ---------- ServerController ----------
+
+use std::net::{IpAddr, SocketAddr};
+
+use tokio::runtime::Handle;
+use tokio::task::JoinHandle;
+
+pub struct BindPlan {
+    pub addrs: Vec<IpAddr>,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone)]
+pub enum ServerStatus {
+    Stopped,
+    Running { addrs: Vec<SocketAddr> },
+    Failed(String),
+}
+
+/// 같은 프로세스 안에서 HTTP 서버를 켜고 끈다. 모든 메서드는 동기이며 런타임 밖 스레드에서 부른다.
+pub struct ServerController {
+    rt: Handle,
+    status: ServerStatus,
+    shutdown: Option<watch::Sender<bool>>,
+    ws_shutdown: Option<watch::Sender<bool>>,
+    handles: Vec<JoinHandle<()>>,
+}
+
+pub const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+
+impl ServerController {
+    pub fn new(rt: Handle) -> Self {
+        ServerController {
+            rt,
+            status: ServerStatus::Stopped,
+            shutdown: None,
+            ws_shutdown: None,
+            handles: Vec::new(),
+        }
+    }
+
+    pub fn status(&self) -> &ServerStatus {
+        &self.status
+    }
+
+    pub fn is_running(&self) -> bool {
+        matches!(self.status, ServerStatus::Running { .. })
+    }
+
+    pub fn start(&mut self, state: AppState, plan: BindPlan) -> Result<Vec<SocketAddr>, String> {
+        if self.is_running() {
+            self.stop();
+        }
+        let mut listeners = Vec::new();
+        for ip in &plan.addrs {
+            let addr = SocketAddr::new(*ip, plan.port);
+            match std::net::TcpListener::bind(addr) {
+                Ok(l) => {
+                    if let Err(e) = l.set_nonblocking(true) {
+                        let msg = format!("{addr} 설정 실패: {e}");
+                        self.status = ServerStatus::Failed(msg.clone());
+                        return Err(msg);
+                    }
+                    listeners.push(l);
+                }
+                Err(e) => {
+                    let msg = match e.kind() {
+                        std::io::ErrorKind::AddrInUse => format!("포트 {} 사용 중", plan.port),
+                        _ => format!("{addr} 바인딩 실패: {e}"),
+                    };
+                    self.status = ServerStatus::Failed(msg.clone());
+                    return Err(msg);
+                }
+            }
+        }
+        if listeners.is_empty() {
+            let msg = "바인딩할 주소가 없습니다".to_string();
+            self.status = ServerStatus::Failed(msg.clone());
+            return Err(msg);
+        }
+
+        let _ = state.shutdown.send(false);
+        self.ws_shutdown = Some(state.shutdown.clone());
+        let (tx, rx) = watch::channel(false);
+        let app = build_router(state);
+        let mut bound = Vec::new();
+        for listener in listeners {
+            let addr = listener.local_addr().map_err(|e| e.to_string())?;
+            bound.push(addr);
+            let app = app.clone();
+            let mut rx = rx.clone();
+            self.handles.push(self.rt.spawn(async move {
+                let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
+                    return;
+                };
+                let _ = axum::serve(
+                    listener,
+                    app.into_make_service_with_connect_info::<SocketAddr>(),
+                )
+                .with_graceful_shutdown(async move {
+                    let _ = rx.wait_for(|stopping| *stopping).await;
+                })
+                .await;
+            }));
+        }
+        self.shutdown = Some(tx);
+        self.status = ServerStatus::Running { addrs: bound.clone() };
+        Ok(bound)
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(tx) = self.ws_shutdown.take() {
+            let _ = tx.send(true);
+        }
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(true);
+        }
+        let handles = std::mem::take(&mut self.handles);
+        if !handles.is_empty() {
+            let aborts: Vec<_> = handles.iter().map(|h| h.abort_handle()).collect();
+            let all = futures::future::join_all(handles);
+            let finished = self
+                .rt
+                .block_on(async { tokio::time::timeout(STOP_TIMEOUT, all).await.is_ok() });
+            if !finished {
+                for a in aborts {
+                    a.abort();
+                }
+            }
+        }
+        self.status = ServerStatus::Stopped;
+    }
+}
+
+impl Drop for ServerController {
+    fn drop(&mut self) {
+        if let Some(tx) = self.ws_shutdown.take() {
+            let _ = tx.send(true);
+        }
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(true);
+        }
+        for h in self.handles.drain(..) {
+            h.abort();
+        }
+    }
 }
