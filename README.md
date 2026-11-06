@@ -2,7 +2,6 @@
 
 > A tiny, password-only shared board for passing secrets and files between your own machines over LAN or Tailscale. One Rust binary, no accounts, no cloud.
 
-[![CI](https://github.com/GenesisSam/open-rally/actions/workflows/ci.yml/badge.svg)](https://github.com/GenesisSam/open-rally/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
 
