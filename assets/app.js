@@ -99,9 +99,21 @@
     return card;
   }
 
+  function purgedCard(att) {
+    const card = el('div', 'file-card purged');
+    card.appendChild(el('div', 'ico', '🗑'));
+    const nm = el('div', 'nm');
+    nm.appendChild(document.createTextNode(att.filename));
+    nm.appendChild(el('small', null, fmtSize(att.size) + ' · 자동 정리로 삭제됨'));
+    card.appendChild(nm);
+    return card;
+  }
+
   function attachment(att) {
     const wrap = el('div', 'att');
-    if (att.kind === 'image') {
+    if (att.purged) {
+      wrap.appendChild(purgedCard(att));
+    } else if (att.kind === 'image') {
       const img = el('img');
       img.src = att.url;
       img.alt = att.filename;
@@ -158,6 +170,27 @@
   function removePost(id) {
     const node = st.posts.get(id);
     if (node) { node.remove(); st.posts.delete(id); }
+  }
+
+  function updatePost(post) {
+    const old = st.posts.get(post.id);
+    if (!old) return;
+    const node = renderPost(post);
+    old.replaceWith(node);
+    st.posts.set(post.id, node);
+  }
+
+  function showRetention(days) {
+    const note = $('#retention');
+    note.textContent = days > 0 ? '첨부 ' + days + '일 후 자동 삭제' : '';
+  }
+
+  async function loadSettings() {
+    try {
+      const r = await api('/api/settings');
+      const s = await r.json();
+      showRetention(s.retention_days || 0);
+    } catch (e) { /* 401 은 api 가 처리 */ }
   }
 
   function replaceAll(posts) {
@@ -269,7 +302,7 @@
       st.backoff = 1000;
       if (st.everConnected) {
         // 끊긴 동안 생기거나 지워진 글을 반영하기 위해 전체를 다시 받는다.
-        try { await loadInitial(); } catch (e) { /* 401 처리됨 */ }
+        try { await loadInitial(); await loadSettings(); } catch (e) { /* 401 처리됨 */ }
       }
       st.everConnected = true;
     };
@@ -278,6 +311,7 @@
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
       if (msg.type === 'created') appendPost(msg.post);
       else if (msg.type === 'deleted') removePost(msg.id);
+      else if (msg.type === 'updated') updatePost(msg.post);
     };
     ws.onclose = () => {
       setDot(false);
@@ -412,6 +446,7 @@
   async function start() {
     try {
       await loadInitial();
+      await loadSettings();
     } catch (e) {
       return; // 401 → 로그인 화면
     }

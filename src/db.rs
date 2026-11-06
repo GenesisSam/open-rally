@@ -12,6 +12,9 @@ pub struct Attachment {
     pub mime: String,
     pub kind: String,
     pub url: String,
+    /// 자동 정리로 파일이 지워졌으면 true (글과 메타데이터는 남는다).
+    #[serde(default)]
+    pub purged: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
@@ -45,7 +48,8 @@ CREATE TABLE IF NOT EXISTS attachments (
   filename  TEXT NOT NULL,
   size      INTEGER NOT NULL,
   mime      TEXT NOT NULL,
-  kind      TEXT NOT NULL
+  kind      TEXT NOT NULL,
+  purged    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS attachments_post_id ON attachments(post_id);
 ";
@@ -62,7 +66,24 @@ impl Db {
     fn init(conn: Connection) -> Result<Db, String> {
         conn.execute_batch("PRAGMA foreign_keys = ON;").map_err(err)?;
         conn.execute_batch(SCHEMA).map_err(err)?;
+        Self::migrate(&conn)?;
         Ok(Db(Mutex::new(conn)))
+    }
+
+    /// 예전 DB 에 없는 컬럼을 추가한다.
+    fn migrate(conn: &Connection) -> Result<(), String> {
+        let has_purged = conn
+            .prepare("PRAGMA table_info(attachments)")
+            .map_err(err)?
+            .query_map([], |r| r.get::<_, String>(1))
+            .map_err(err)?
+            .filter_map(Result::ok)
+            .any(|c| c == "purged");
+        if !has_purged {
+            conn.execute_batch("ALTER TABLE attachments ADD COLUMN purged INTEGER NOT NULL DEFAULT 0")
+                .map_err(err)?;
+        }
+        Ok(())
     }
 
     pub fn open(path: &Path) -> Result<Db, String> {
@@ -114,6 +135,7 @@ impl Db {
                     mime: a.mime.clone(),
                     kind: a.kind.clone(),
                     url: attachment_url(&a.id, &a.filename),
+                    purged: false,
                 })
                 .collect(),
         })
@@ -122,7 +144,7 @@ impl Db {
     fn attachments_for(conn: &Connection, post_id: &str) -> Result<Vec<Attachment>, String> {
         let mut stmt = conn
             .prepare_cached(
-                "SELECT id, filename, size, mime, kind FROM attachments WHERE post_id = ?1 ORDER BY id",
+                "SELECT id, filename, size, mime, kind, purged FROM attachments WHERE post_id = ?1 ORDER BY id",
             )
             .map_err(err)?;
         let rows = stmt
@@ -136,6 +158,7 @@ impl Db {
                     size: r.get::<_, i64>(2)? as u64,
                     mime: r.get(3)?,
                     kind: r.get(4)?,
+                    purged: r.get::<_, i64>(5)? != 0,
                 })
             })
             .map_err(err)?;
@@ -193,7 +216,7 @@ impl Db {
     pub fn get_attachment(&self, id: &str) -> Result<Option<(String, Attachment)>, String> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT post_id, id, filename, size, mime, kind FROM attachments WHERE id = ?1",
+            "SELECT post_id, id, filename, size, mime, kind, purged FROM attachments WHERE id = ?1",
             params![id],
             |r| {
                 let post_id: String = r.get(0)?;
@@ -208,12 +231,47 @@ impl Db {
                         size: r.get::<_, i64>(3)? as u64,
                         mime: r.get(4)?,
                         kind: r.get(5)?,
+                        purged: r.get::<_, i64>(6)? != 0,
                     },
                 ))
             },
         )
         .optional()
         .map_err(err)
+    }
+
+    /// `cutoff_ms` 보다 오래된 글의 아직 안 지워진 첨부를 purged 로 표시하고,
+    /// 영향을 받은 글들을 돌려준다. 파일 삭제는 호출자가 한다.
+    pub fn purge_attachments_before(&self, cutoff_ms: i64) -> Result<Vec<Post>, String> {
+        let ids: Vec<String> = {
+            let conn = self.lock();
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT DISTINCT a.post_id FROM attachments a JOIN posts p ON p.id = a.post_id
+                     WHERE p.created_at < ?1 AND a.purged = 0 ORDER BY a.post_id",
+                )
+                .map_err(err)?;
+            let rows = stmt
+                .query_map(params![cutoff_ms], |r| r.get::<_, String>(0))
+                .map_err(err)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(err)?;
+            for id in &rows {
+                conn.execute(
+                    "UPDATE attachments SET purged = 1 WHERE post_id = ?1 AND purged = 0",
+                    params![id],
+                )
+                .map_err(err)?;
+            }
+            rows
+        };
+        let mut posts = Vec::with_capacity(ids.len());
+        for id in ids {
+            if let Some(p) = self.get_post(&id)? {
+                posts.push(p);
+            }
+        }
+        Ok(posts)
     }
 
     pub fn delete_post(&self, id: &str) -> Result<bool, String> {
@@ -265,6 +323,46 @@ mod tests {
         assert_eq!(attachment_url("A1", "x.png"), "/files/A1/x.png");
         assert_eq!(attachment_url("A1", "#1 notes.txt"), "/files/A1/%231%20notes.txt");
         assert_eq!(attachment_url("A1", "한.txt"), "/files/A1/%ED%95%9C.txt");
+    }
+
+    #[test]
+    fn purge_marks_old_attachments_and_returns_affected_posts() {
+        let db = Db::open_in_memory().unwrap();
+        db.insert_post("01A", 1_000, Some("old text"), &[att("A1", "a.bin", "application/octet-stream", "file"), att("A2", "b.png", "image/png", "image")]).unwrap();
+        db.insert_post("01B", 1_000, Some("old text only"), &[]).unwrap();
+        db.insert_post("01C", 9_000, None, &[att("A3", "c.bin", "application/octet-stream", "file")]).unwrap();
+        let affected = db.purge_attachments_before(5_000).unwrap();
+        assert_eq!(affected.len(), 1);
+        assert_eq!(affected[0].id, "01A");
+        assert!(affected[0].attachments.iter().all(|a| a.purged));
+        assert_eq!(affected[0].body.as_deref(), Some("old text"));
+        // 두 번째 호출은 이미 정리된 것을 다시 돌려주지 않는다
+        assert!(db.purge_attachments_before(5_000).unwrap().is_empty());
+        let posts = db.list_posts(None, None, 10).unwrap();
+        let c = posts.iter().find(|p| p.id == "01C").unwrap();
+        assert!(!c.attachments[0].purged);
+        let (_, a1) = db.get_attachment("A1").unwrap().unwrap();
+        assert!(a1.purged);
+    }
+
+    #[test]
+    fn open_migrates_schema_without_purged_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.db");
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE posts (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, body TEXT);
+                 CREATE TABLE attachments (id TEXT PRIMARY KEY, post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+                   filename TEXT NOT NULL, size INTEGER NOT NULL, mime TEXT NOT NULL, kind TEXT NOT NULL);
+                 INSERT INTO posts VALUES ('01A', 1, NULL);
+                 INSERT INTO attachments VALUES ('A1', '01A', 'x', 1, 'text/plain', 'file');",
+            )
+            .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        let posts = db.list_posts(None, None, 10).unwrap();
+        assert_eq!(posts[0].attachments[0].purged, false);
     }
 
     #[test]

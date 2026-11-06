@@ -1,3 +1,4 @@
+pub mod cleanup;
 pub mod middleware;
 pub mod routes;
 pub mod ws;
@@ -24,6 +25,8 @@ pub struct Inner {
     pub events: broadcast::Sender<String>,
     /// 서버를 끌 때 true 가 된다. 열린 WebSocket 이 이걸 보고 닫는다.
     pub shutdown: watch::Sender<bool>,
+    /// 자동 정리 기간(일). 0 이면 끔. 바꾸면 cleanup 작업이 바로 한 번 돈다.
+    pub retention: watch::Sender<u32>,
     ids: Mutex<ulid::Generator>,
 }
 
@@ -40,6 +43,7 @@ impl AppState {
             limiter: RateLimiter::new(5, Duration::from_secs(10)),
             events: ws::event_channel(),
             shutdown: watch::channel(false).0,
+            retention: watch::channel(0).0,
             ids: Mutex::new(ulid::Generator::new()),
         }))
     }
@@ -65,6 +69,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/style.css", get(routes::style_css))
         .route("/api/login", post(routes::login))
         .route("/api/session", get(routes::session))
+        .route("/api/settings", get(routes::settings))
         .route(
             "/api/posts",
             get(routes::list_posts)
@@ -168,6 +173,7 @@ impl ServerController {
         let _ = state.shutdown.send(false);
         self.ws_shutdown = Some(state.shutdown.clone());
         let (tx, rx) = watch::channel(false);
+        self.handles.push(self.rt.spawn(cleanup::run(state.clone())));
         let app = build_router(state);
         let mut bound = Vec::new();
         for listener in listeners {

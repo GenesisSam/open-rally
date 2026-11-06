@@ -42,6 +42,7 @@ body {
   background: var(--card);
   border-bottom: 1px solid var(--border);
 }
+#topbar .retention { color: var(--muted); font-size: 12px; margin-left: 10px; }
 #topbar .host { color: var(--muted); font-size: 12px; margin-left: auto; font-family: ui-monospace, Menlo, monospace; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; display: inline-block; }
 .dot.on { background: var(--ok); }
@@ -89,6 +90,9 @@ body {
 .file-card .nm small { display: block; color: var(--muted); font-size: 11px; }
 .file-card a { color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; font-size: 12px; white-space: nowrap; }
 .file-card a:hover { background: var(--border); }
+.file-card.purged { opacity: .6; }
+.file-card.purged .nm { text-decoration: line-through; }
+.file-card.purged .nm small { text-decoration: none; }
 
 /* 입력창 */
 #composer {

@@ -7,6 +7,8 @@ services:
     restart: unless-stopped
     environment:
       OPEN_RALLY_PASSWORD: change-me
+      # 이 일수보다 오래된 첨부 파일을 자동 삭제. 0 이면 영구 보관.
+      OPEN_RALLY_RETENTION_DAYS: "0"
     ports:
       # 호스트의 Tailscale IP 에만 묶는다. 0.0.0.0 으로 두면 LAN 전체에 열린다.
       - "100.100.100.100:7777:7777"

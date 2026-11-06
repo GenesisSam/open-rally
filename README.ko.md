@@ -20,6 +20,7 @@ open-rally 는 그 사이에 있는 도구다. 같은 사설망의 어떤 기기
 - **단일 바이너리.** 웹 UI 가 바이너리 안에 들어 있고 SQLite 도 번들된다.
 - **macOS 메뉴바 앱** 으로 서버를 켜고 끈다. 꺼져 있으면 아무것도 듣지 않고 아무것도 쓰지 않는다.
 - **Docker 이미지** 로 상시 서버(NAS, 홈서버, Docker Desktop)에도 올린다.
+- **첨부 자동 정리.** 메뉴나 설정에서 기간(1·7·30·90일, 또는 끄기)을 고르면 그보다 오래된 첨부 파일을 매시간 지운다. 글과 텍스트는 남고 첨부는 "자동 정리로 삭제됨"으로 표시된다.
 - **기본이 비공개.** Tailscale 인터페이스와 localhost 에만 열리고, LAN 공개는 명시적 토글이다. Host/Origin 허용 목록으로 브라우저 경유 CSRF 와 DNS rebinding 을 막는다.
 - **스트리밍 업로드.** 1 GB 영상을 올려도 메모리가 1 GB 늘지 않는다.
 
@@ -70,8 +71,16 @@ cargo build --release --no-default-features    # 트레이 의존성 없는 head
 | `OPEN_RALLY_PORT` | `7777` | 리스닝 포트 |
 | `OPEN_RALLY_DATA_DIR` | macOS `~/Library/Application Support/open-rally`, Linux `~/.local/share/open-rally`, Windows `%APPDATA%\open-rally`, Docker `/data` | DB·업로드·`config.toml` 위치 |
 | `OPEN_RALLY_PASSWORD` | 없음 | 있으면 `config.toml` 대신 쓴다 |
+| `OPEN_RALLY_RETENTION_DAYS` | 없음 | 이 일수보다 오래된 첨부를 삭제 (`0` 이거나 없으면 영구 보관). `config.toml` 의 `retention_days` 보다 우선 |
 
-데이터 폴더에는 `open-rally.db`(SQLite), `uploads/<글 id>/<파일명>`, 그리고 `password = "..."` 한 줄짜리 `config.toml` 이 있다. 첫 실행 때 무작위 비밀번호가 만들어진다. 바꾼 뒤 서버를 다시 켜면 반영된다.
+데이터 폴더에는 `open-rally.db`(SQLite), `uploads/<글 id>/<파일명>`, 그리고 `config.toml` 이 있다.
+
+```toml
+password = "..."        # 첫 실행 때 생성. 바꾼 뒤 서버를 다시 켜면 반영
+retention_days = 7      # 선택. 메뉴바의 "첨부 자동 정리" 하위 메뉴가 이 줄을 쓴다
+```
+
+정리는 서버가 켜질 때, 기간을 바꿀 때, 그 뒤 매시간 돈다. 파일만 지우고 글은 텍스트와 함께 남으며 첨부는 정리됨으로 표시된다.
 
 ## 보안 모델
 

@@ -80,6 +80,10 @@ pub async fn session() -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
+pub async fn settings(State(state): State<AppState>) -> Response {
+    Json(serde_json::json!({ "retention_days": *state.retention.borrow() })).into_response()
+}
+
 // ---------- posts ----------
 
 use axum::extract::{Multipart, Path, Query};
@@ -222,6 +226,9 @@ pub async fn serve_file(
     let Some((post_id, att)) = state.db.get_attachment(&id).ok().flatten() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    if att.purged {
+        return (StatusCode::NOT_FOUND, "자동 정리로 삭제된 파일입니다").into_response();
+    }
     let path = state.uploads_dir.join(post_id).join(&att.filename);
     let mime: Mime = att.mime.parse().unwrap_or(APPLICATION_OCTET_STREAM);
     let mut svc = ServeFile::new_with_mime(path, &mime);

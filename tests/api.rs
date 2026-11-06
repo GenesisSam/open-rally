@@ -425,3 +425,84 @@ async fn login_body_over_limit_is_413() {
         .unwrap();
     assert_eq!(r.status(), 413);
 }
+
+// ---------- retention sweep ----------
+
+use open_rally::server::cleanup::sweep;
+
+#[tokio::test]
+async fn sweep_purges_old_attachments_only_when_enabled() {
+    let (state, dir) = test_state();
+    let app = build_router(state.clone());
+    let cookie = login(&app).await;
+    let day = 86_400_000i64;
+    let now = 100 * day;
+
+    // 오래된 글: 직접 DB 에 넣고 파일도 디스크에 둔다
+    let old_dir = dir.path().join("uploads").join("01OLD");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::write(old_dir.join("big.bin"), b"xxxx").unwrap();
+    state
+        .db
+        .insert_post(
+            "01OLD",
+            now - 10 * day,
+            Some("keep this text"),
+            &[open_rally::db::NewAttachment {
+                id: "AOLD".into(),
+                filename: "big.bin".into(),
+                size: 4,
+                mime: "application/octet-stream".into(),
+                kind: "file".into(),
+            }],
+        )
+        .unwrap();
+    // 최근 글
+    let r = post_multipart(&app, &cookie, &[("files", Some("new.bin"), "application/octet-stream", b"yy")]).await;
+    let new_id = body_json(r).await["id"].as_str().unwrap().to_string();
+
+    // 꺼져 있으면 아무것도 안 한다
+    assert_eq!(sweep(&state, now).await.unwrap(), 0);
+    assert!(old_dir.join("big.bin").exists());
+
+    state.retention.send_replace(7);
+    let mut rx = state.events.subscribe();
+    assert_eq!(sweep(&state, now).await.unwrap(), 1);
+    assert!(!old_dir.join("big.bin").exists(), "old file removed");
+    assert!(dir.path().join("uploads").join(&new_id).join("new.bin").exists(), "new file kept");
+
+    let ev: serde_json::Value = serde_json::from_str(&rx.recv().await.unwrap()).unwrap();
+    assert_eq!(ev["type"], "updated");
+    assert_eq!(ev["post"]["id"], "01OLD");
+    assert_eq!(ev["post"]["attachments"][0]["purged"], true);
+
+    let list = get_posts(&app, &cookie, "").await;
+    let old = list["posts"].as_array().unwrap().iter().find(|p| p["id"] == "01OLD").unwrap();
+    assert_eq!(old["body"], "keep this text");
+    assert_eq!(old["attachments"][0]["purged"], true);
+
+    // 정리된 첨부는 404
+    let r = app
+        .clone()
+        .oneshot(req("GET", "/files/AOLD/big.bin").header("cookie", &cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 404);
+
+    // 두 번째 sweep 은 0
+    assert_eq!(sweep(&state, now).await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn settings_route_reports_retention() {
+    let (state, _d) = test_state();
+    let app = build_router(state.clone());
+    let cookie = login(&app).await;
+    state.retention.send_replace(30);
+    let r = app
+        .oneshot(req("GET", "/api/settings").header("cookie", &cookie).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(body_json(r).await["retention_days"], 30);
+}

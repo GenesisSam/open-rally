@@ -23,6 +23,7 @@ open-rally is the thing in between: a web page every machine on your private net
 - **Single binary.** The web UI is embedded; the only runtime dependency is SQLite, which is bundled.
 - **macOS menubar app** to switch the server on and off. When it is off, nothing listens and nothing is used.
 - **Docker image** for an always-on host (NAS, home server, Docker Desktop).
+- **Automatic cleanup** of old attachments. Pick a retention period (1, 7, 30 or 90 days, or off) from the menu or config; files older than that are deleted hourly while the text of the post stays, marked as cleaned up.
 - **Private by default.** Binds to the Tailscale interface and localhost only; exposing to the LAN is an explicit toggle. Host/Origin allowlists block CSRF and DNS rebinding from the browsers that use it.
 - **Streaming uploads.** A 1 GB video does not cost 1 GB of RAM.
 
@@ -73,8 +74,16 @@ cargo build --release --no-default-features   # headless binary without the tray
 | `OPEN_RALLY_PORT` | `7777` | Listening port |
 | `OPEN_RALLY_DATA_DIR` | `~/Library/Application Support/open-rally` (macOS), `~/.local/share/open-rally` (Linux), `%APPDATA%\open-rally` (Windows), `/data` (Docker) | Where the database, uploads and `config.toml` live |
 | `OPEN_RALLY_PASSWORD` | unset | If set, used instead of `config.toml` |
+| `OPEN_RALLY_RETENTION_DAYS` | unset | Delete attachments older than this many days (`0` or unset: keep forever). Overrides `retention_days` in `config.toml` |
 
-The data folder contains `open-rally.db` (SQLite), `uploads/<post-id>/<filename>` and `config.toml` with a single `password = "..."` line. A random password is generated on first run. Change it and restart the server to apply.
+The data folder contains `open-rally.db` (SQLite), `uploads/<post-id>/<filename>` and `config.toml`:
+
+```toml
+password = "..."        # generated on first run; change it and restart the server
+retention_days = 7      # optional; the menubar "Auto-clean attachments" submenu writes this line
+```
+
+Cleanup runs when the server starts, whenever the period changes, and every hour after that. Only files are removed; the post keeps its text and shows the attachment as cleaned up.
 
 ## Security model
 

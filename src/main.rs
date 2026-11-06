@@ -36,6 +36,7 @@ fn serve(lan: bool) -> Result<(), String> {
     let cfg = config::load()?;
     let db = Db::open(&config::db_path(&cfg.data_dir))?;
     let state = AppState::new(db, config::uploads_dir(&cfg.data_dir), cfg.password.clone());
+    state.retention.send_replace(cfg.retention_days);
     let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
     let mut ctl = ServerController::new(rt.handle().clone());
     let addrs = ctl.start(state, bind_plan(lan, cfg.port))?;
@@ -46,6 +47,9 @@ fn serve(lan: bool) -> Result<(), String> {
         println!("비밀번호: OPEN_RALLY_PASSWORD 환경변수");
     } else {
         println!("비밀번호 파일: {}", config::config_path(&cfg.data_dir).display());
+    }
+    if cfg.retention_days > 0 {
+        println!("자동 정리: {}일 지난 첨부 삭제", cfg.retention_days);
     }
     println!("Ctrl+C 로 종료");
     let _ = rt.block_on(tokio::signal::ctrl_c());

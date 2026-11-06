@@ -3,7 +3,7 @@
 
 use std::net::Ipv4Addr;
 
-use muda::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem};
+use muda::{CheckMenuItem, Menu, MenuEvent, MenuId, MenuItem, PredefinedMenuItem, Submenu};
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
@@ -20,6 +20,9 @@ const ID_LAN: &str = "lan";
 const ID_PASSWORD: &str = "password";
 const ID_DATA: &str = "data";
 const ID_QUIT: &str = "quit";
+const ID_RETAIN_PREFIX: &str = "retain:";
+/// 하위 메뉴에 보여줄 기간 선택지(일). 0 은 끔.
+const RETENTION_CHOICES: &[u32] = &[0, 1, 7, 30, 90];
 
 enum UserEvent {
     Menu(MenuId),
@@ -30,6 +33,8 @@ struct App {
     ctl: ServerController,
     tray: Option<TrayIcon>,
     lan: bool,
+    /// 실행 중인 서버의 상태. 자동 정리 기간을 바꿀 때 쓴다.
+    state: Option<AppState>,
     /// config/DB 오류처럼 ServerController 밖에서 난 마지막 시작 실패 사유.
     last_error: Option<String>,
 }
@@ -133,6 +138,18 @@ impl App {
         let _ = menu.append(&MenuItem::with_id(ID_COPY, "접속 주소 복사", running, None));
         let _ = menu.append(&PredefinedMenuItem::separator());
         let _ = menu.append(&CheckMenuItem::with_id(ID_LAN, "LAN 에도 공개", true, self.lan, None));
+        let retain = Submenu::new("첨부 자동 정리", true);
+        for &days in RETENTION_CHOICES {
+            let label = if days == 0 { "끄기".to_string() } else { format!("{days}일 지나면 삭제") };
+            let _ = retain.append(&CheckMenuItem::with_id(
+                format!("{ID_RETAIN_PREFIX}{days}"),
+                label,
+                true,
+                self.cfg.retention_days == days,
+                None,
+            ));
+        }
+        let _ = menu.append(&retain);
         let _ = menu.append(&MenuItem::with_id(ID_PASSWORD, "비밀번호 파일 열기", true, None));
         let _ = menu.append(&MenuItem::with_id(ID_DATA, "데이터 폴더 열기", true, None));
         let _ = menu.append(&PredefinedMenuItem::separator());
@@ -155,8 +172,10 @@ impl App {
         let result = config::load().and_then(|cfg| {
             let db = Db::open(&config::db_path(&cfg.data_dir))?;
             let state = AppState::new(db, config::uploads_dir(&cfg.data_dir), cfg.password.clone());
+            state.retention.send_replace(cfg.retention_days);
             let plan = bind_plan(self.lan, cfg.port);
             self.cfg = cfg;
+            self.state = Some(state.clone());
             self.ctl.start(state, plan).map(|_| ())
         });
         self.last_error = match result {
@@ -174,7 +193,24 @@ impl App {
         self.refresh();
     }
 
+    fn set_retention(&mut self, days: u32) {
+        match config::set_retention_days(&self.cfg.data_dir, days) {
+            Ok(()) => {
+                self.cfg.retention_days = days;
+                if let Some(state) = &self.state {
+                    state.retention.send_replace(days); // cleanup 작업이 바로 한 번 돈다
+                }
+            }
+            Err(e) => eprintln!("open-rally: 자동 정리 설정 저장 실패: {e}"),
+        }
+        self.refresh();
+    }
+
     fn on_menu(&mut self, id: &str, control_flow: &mut ControlFlow) {
+        if let Some(days) = id.strip_prefix(ID_RETAIN_PREFIX).and_then(|d| d.parse::<u32>().ok()) {
+            self.set_retention(days);
+            return;
+        }
         match id {
             ID_TOGGLE => {
                 if self.running() {
@@ -238,6 +274,7 @@ pub fn run(cfg: Config) -> ! {
         ctl: ServerController::new(rt.handle().clone()),
         tray: None,
         lan: false,
+        state: None,
         last_error: None,
     };
 
