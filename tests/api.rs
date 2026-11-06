@@ -331,3 +331,78 @@ async fn list_pagination_before_after_limit() {
     assert_eq!(list["posts"].as_array().unwrap().len(), 1);
     assert_eq!(list["posts"][0]["id"], ids[2]);
 }
+
+// ---------- Task 9: files ----------
+
+#[tokio::test]
+async fn file_headers_and_range() {
+    let (state, _d) = test_state();
+    let app = build_router(state);
+    let cookie = login(&app).await;
+    let r = post_multipart(
+        &app,
+        &cookie,
+        &[
+            ("files", Some("x.png"), "image/png", b"0123456789"),
+            ("files", Some("x.svg"), "image/svg+xml", b"<svg/>"),
+            ("files", Some("deploy-tool"), "application/octet-stream", b"bin"),
+        ],
+    )
+    .await;
+    assert_eq!(r.status(), 201);
+    let created = body_json(r).await;
+    let urls: Vec<String> = created["attachments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["url"].as_str().unwrap().to_string())
+        .collect();
+
+    let get = |url: String, range: Option<&'static str>, with_cookie: bool| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        async move {
+            let mut b = req("GET", &url);
+            if with_cookie {
+                b = b.header("cookie", cookie);
+            }
+            if let Some(rg) = range {
+                b = b.header("range", rg);
+            }
+            app.oneshot(b.body(Body::empty()).unwrap()).await.unwrap()
+        }
+    };
+
+    let r = get(urls[0].clone(), None, true).await;
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["content-type"], "image/png");
+    assert_eq!(r.headers()["content-disposition"], "inline");
+    assert_eq!(r.headers()["x-content-type-options"], "nosniff");
+    assert_eq!(body_bytes(r).await.as_ref(), b"0123456789");
+
+    let r = get(urls[1].clone(), None, true).await;
+    assert!(r.headers()["content-disposition"]
+        .to_str()
+        .unwrap()
+        .starts_with("attachment"));
+
+    let r = get(urls[2].clone(), None, true).await;
+    assert_eq!(
+        r.headers()["content-disposition"],
+        "attachment; filename=\"deploy-tool\""
+    );
+
+    let r = get(urls[0].clone(), Some("bytes=0-3"), true).await;
+    assert_eq!(r.status(), 206);
+    assert!(r.headers()["content-range"]
+        .to_str()
+        .unwrap()
+        .starts_with("bytes 0-3/"));
+    assert_eq!(body_bytes(r).await.as_ref(), b"0123");
+
+    let r = get("/files/nope/x".to_string(), None, true).await;
+    assert_eq!(r.status(), 404);
+
+    let r = get(urls[0].clone(), None, false).await;
+    assert_eq!(r.status(), 401);
+}

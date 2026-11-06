@@ -64,6 +64,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/session", get(routes::session))
         .route("/api/posts", get(routes::list_posts).post(routes::create_post))
         .route("/api/posts/{id}", delete(routes::delete_post))
+        .route("/files/{id}/{name}", get(routes::serve_file))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::require_session,

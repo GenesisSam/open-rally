@@ -204,3 +204,33 @@ pub async fn delete_post(State(state): State<AppState>, Path(id): Path<String>) 
         Err(e) => server_error(e),
     }
 }
+
+// ---------- files ----------
+
+use mime_guess::mime::{Mime, APPLICATION_OCTET_STREAM};
+use tower_http::services::ServeFile;
+
+use crate::files::disposition;
+
+pub async fn serve_file(
+    State(state): State<AppState>,
+    Path((id, _name)): Path<(String, String)>,
+    req: Request,
+) -> Response {
+    let Some((post_id, att)) = state.db.get_attachment(&id).ok().flatten() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let path = state.uploads_dir.join(post_id).join(&att.filename);
+    let mime: Mime = att.mime.parse().unwrap_or(APPLICATION_OCTET_STREAM);
+    let mut svc = ServeFile::new_with_mime(path, &mime);
+    let mut resp = match svc.try_call(req).await {
+        Ok(r) => r.into_response(),
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let headers = resp.headers_mut();
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    if let Ok(v) = HeaderValue::from_str(&disposition(&att.mime, &att.filename)) {
+        headers.insert(header::CONTENT_DISPOSITION, v);
+    }
+    resp
+}
