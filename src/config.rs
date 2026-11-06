@@ -54,7 +54,13 @@ pub fn load() -> Result<Config, String> {
         .map_err(|e| format!("데이터 폴더를 만들 수 없습니다 ({}): {e}", data_dir.display()))?;
 
     let path = config_path(&data_dir);
-    let password = if path.exists() {
+    let env_password = std::env::var("OPEN_RALLY_PASSWORD")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let password = if let Some(pw) = env_password {
+        // 컨테이너처럼 파일 대신 환경변수로 넘기는 경우. config.toml 은 만들지 않는다.
+        pw
+    } else if path.exists() {
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("config.toml 을 읽을 수 없습니다: {e}"))?;
         toml::from_str::<ConfigFile>(&text)
@@ -79,7 +85,7 @@ mod tests {
 
     fn temp_env(vars: &[(&str, &str)], f: impl FnOnce()) {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let saved: Vec<(String, Option<String>)> = ["OPEN_RALLY_DATA_DIR", "OPEN_RALLY_PORT"]
+        let saved: Vec<(String, Option<String>)> = ["OPEN_RALLY_DATA_DIR", "OPEN_RALLY_PORT", "OPEN_RALLY_PASSWORD"]
             .iter()
             .map(|k| (k.to_string(), std::env::var(k).ok()))
             .collect();
@@ -115,6 +121,37 @@ mod tests {
                 let again = load().unwrap();
                 assert_eq!(again.password, cfg.password);
             },
+        );
+    }
+
+    #[test]
+    fn env_password_overrides_file_and_skips_creating_it() {
+        let dir = tempfile::tempdir().unwrap();
+        temp_env(
+            &[
+                ("OPEN_RALLY_DATA_DIR", dir.path().to_str().unwrap()),
+                ("OPEN_RALLY_PASSWORD", "from-env"),
+            ],
+            || {
+                assert_eq!(load().unwrap().password, "from-env");
+                assert!(!config_path(dir.path()).exists());
+                assert!(uploads_dir(dir.path()).is_dir());
+            },
+        );
+        std::fs::write(dir.path().join("config.toml"), "password = \"file\"\n").unwrap();
+        temp_env(
+            &[
+                ("OPEN_RALLY_DATA_DIR", dir.path().to_str().unwrap()),
+                ("OPEN_RALLY_PASSWORD", "from-env"),
+            ],
+            || assert_eq!(load().unwrap().password, "from-env"),
+        );
+        temp_env(
+            &[
+                ("OPEN_RALLY_DATA_DIR", dir.path().to_str().unwrap()),
+                ("OPEN_RALLY_PASSWORD", ""),
+            ],
+            || assert_eq!(load().unwrap().password, "file"),
         );
     }
 

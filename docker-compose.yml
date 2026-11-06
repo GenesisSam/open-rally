@@ -1,0 +1,17 @@
+# 사용 전 바꿀 것: OPEN_RALLY_PASSWORD, 그리고 ports 의 호스트 IP 를 이 머신의 Tailscale IP 로.
+services:
+  open-rally:
+    build: .
+    image: open-rally
+    container_name: open-rally
+    restart: unless-stopped
+    environment:
+      OPEN_RALLY_PASSWORD: change-me
+    ports:
+      # 호스트의 Tailscale IP 에만 묶는다. 0.0.0.0 으로 두면 LAN 전체에 열린다.
+      - "100.100.100.100:7777:7777"
+    volumes:
+      - open-rally-data:/data
+
+volumes:
+  open-rally-data:

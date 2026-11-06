@@ -16,12 +16,19 @@ fn main() {
         }
         return;
     }
+    #[cfg(feature = "tray")]
     match config::load() {
         Ok(cfg) => open_rally::tray::run(cfg),
         Err(e) => {
             eprintln!("open-rally: {e}");
             std::process::exit(1);
         }
+    }
+    // headless 빌드(--no-default-features)에는 서버 모드뿐이다.
+    #[cfg(not(feature = "tray"))]
+    if let Err(e) = serve(args.iter().any(|a| a == "--lan")) {
+        eprintln!("open-rally: {e}");
+        std::process::exit(1);
     }
 }
 
@@ -35,7 +42,11 @@ fn serve(lan: bool) -> Result<(), String> {
     for a in &addrs {
         println!("http://{a}");
     }
-    println!("비밀번호 파일: {}", config::config_path(&cfg.data_dir).display());
+    if std::env::var("OPEN_RALLY_PASSWORD").map(|v| !v.is_empty()).unwrap_or(false) {
+        println!("비밀번호: OPEN_RALLY_PASSWORD 환경변수");
+    } else {
+        println!("비밀번호 파일: {}", config::config_path(&cfg.data_dir).display());
+    }
     println!("Ctrl+C 로 종료");
     let _ = rt.block_on(tokio::signal::ctrl_c());
     ctl.stop();

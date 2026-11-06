@@ -1,0 +1,9 @@
+target
+dist
+docs
+scripts
+tests
+.superpowers
+.git
+.claude
+*.md
