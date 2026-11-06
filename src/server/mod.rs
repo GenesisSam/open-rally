@@ -65,7 +65,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/style.css", get(routes::style_css))
         .route("/api/login", post(routes::login))
         .route("/api/session", get(routes::session))
-        .route("/api/posts", get(routes::list_posts).post(routes::create_post))
+        .route(
+            "/api/posts",
+            get(routes::list_posts)
+                .post(routes::create_post)
+                // 업로드만 무제한. 그 밖의 경로(특히 비인증 /api/login)는 axum 기본 2MB.
+                .layer(DefaultBodyLimit::disable()),
+        )
         .route("/api/posts/{id}", delete(routes::delete_post))
         .route("/files/{id}/{name}", get(routes::serve_file))
         .route("/ws", get(ws::ws_handler))
@@ -75,7 +81,6 @@ pub fn build_router(state: AppState) -> Router {
         ))
         .layer(axum::middleware::from_fn(middleware::check_origin))
         .layer(axum::middleware::from_fn(middleware::check_host))
-        .layer(DefaultBodyLimit::disable())
         .with_state(state)
 }
 

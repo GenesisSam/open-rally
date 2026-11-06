@@ -55,8 +55,10 @@ pub async fn login(State(state): State<AppState>, req: Request) -> Response {
     if state.limiter.is_blocked(ip, now) {
         return (StatusCode::TOO_MANY_REQUESTS, "too many attempts").into_response();
     }
-    let Ok(Json(body)) = Json::<LoginReq>::from_request(req, &state).await else {
-        return (StatusCode::BAD_REQUEST, "invalid body").into_response();
+    let body = match Json::<LoginReq>::from_request(req, &state).await {
+        Ok(Json(b)) => b,
+        // 413(본문 초과)·415·400 등 거부 사유의 상태 코드를 그대로 쓴다.
+        Err(rej) => return (rej.status(), "invalid body").into_response(),
     };
     if password_matches(&state.password, &body.password) {
         state.limiter.record_success(ip);

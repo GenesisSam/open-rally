@@ -30,6 +30,32 @@ struct App {
     ctl: ServerController,
     tray: Option<TrayIcon>,
     lan: bool,
+    /// config/DB 오류처럼 ServerController 밖에서 난 마지막 시작 실패 사유.
+    last_error: Option<String>,
+}
+
+/// 메뉴 첫 줄. `.app` 에서는 stderr 가 안 보이므로 실패 사유를 여기 보여준다.
+pub fn status_line(
+    status: &ServerStatus,
+    last_error: Option<&str>,
+    port: u16,
+    lan: bool,
+    has_tailscale: bool,
+) -> String {
+    match status {
+        ServerStatus::Running { .. } => {
+            if !has_tailscale && !lan {
+                format!("● 서버 실행 중 · 포트 {port} · Tailscale 없음, localhost 만")
+            } else {
+                format!("● 서버 실행 중 · 포트 {port}")
+            }
+        }
+        ServerStatus::Failed(e) => format!("○ 시작 실패: {e}"),
+        ServerStatus::Stopped => match last_error {
+            Some(e) => format!("○ 시작 실패: {e}"),
+            None => "○ 서버 꺼짐".to_string(),
+        },
+    }
 }
 
 /// 22×22 템플릿 아이콘. 켜짐은 채운 원, 꺼짐은 테두리만.
@@ -76,17 +102,13 @@ impl App {
     }
 
     fn status_text(&self) -> String {
-        match self.ctl.status() {
-            ServerStatus::Running { .. } => {
-                if tailscale_ip().is_none() && !self.lan {
-                    format!("● 서버 실행 중 · 포트 {} · Tailscale 없음, localhost 만", self.cfg.port)
-                } else {
-                    format!("● 서버 실행 중 · 포트 {}", self.cfg.port)
-                }
-            }
-            ServerStatus::Failed(e) => format!("○ 시작 실패: {e}"),
-            ServerStatus::Stopped => "○ 서버 꺼짐".to_string(),
-        }
+        status_line(
+            self.ctl.status(),
+            self.last_error.as_deref(),
+            self.cfg.port,
+            self.lan,
+            tailscale_ip().is_some(),
+        )
     }
 
     fn build_menu(&self) -> Menu {
@@ -137,9 +159,13 @@ impl App {
             self.cfg = cfg;
             self.ctl.start(state, plan).map(|_| ())
         });
-        if let Err(e) = result {
-            eprintln!("open-rally: 서버 시작 실패: {e}");
-        }
+        self.last_error = match result {
+            Ok(()) => None,
+            Err(e) => {
+                eprintln!("open-rally: 서버 시작 실패: {e}");
+                Some(e)
+            }
+        };
         self.refresh();
     }
 
@@ -212,6 +238,7 @@ pub fn run(cfg: Config) -> ! {
         ctl: ServerController::new(rt.handle().clone()),
         tray: None,
         lan: false,
+        last_error: None,
     };
 
     event_loop.run(move |event, _, control_flow| {
@@ -235,4 +262,29 @@ pub fn run(cfg: Config) -> ! {
             _ => {}
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn status_line_shows_config_or_db_errors() {
+        let stopped = ServerStatus::Stopped;
+        assert_eq!(status_line(&stopped, None, 7777, false, true), "○ 서버 꺼짐");
+        assert_eq!(
+            status_line(&stopped, Some("config.toml 형식이 올바르지 않습니다"), 7777, false, true),
+            "○ 시작 실패: config.toml 형식이 올바르지 않습니다"
+        );
+        assert_eq!(
+            status_line(&ServerStatus::Failed("포트 7777 사용 중".into()), None, 7777, false, true),
+            "○ 시작 실패: 포트 7777 사용 중"
+        );
+        let running = ServerStatus::Running { addrs: vec![] };
+        assert_eq!(status_line(&running, None, 7777, false, true), "● 서버 실행 중 · 포트 7777");
+        assert_eq!(
+            status_line(&running, None, 7777, false, false),
+            "● 서버 실행 중 · 포트 7777 · Tailscale 없음, localhost 만"
+        );
+    }
 }

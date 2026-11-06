@@ -406,3 +406,22 @@ async fn file_headers_and_range() {
     let r = get(urls[0].clone(), None, false).await;
     assert_eq!(r.status(), 401);
 }
+
+// ---------- Final review fixes ----------
+
+#[tokio::test]
+async fn login_body_over_limit_is_413() {
+    let (state, _d) = test_state();
+    let app = build_router(state);
+    let junk = format!(r#"{{"password":"{}"}}"#, "a".repeat(3 * 1024 * 1024));
+    let r = app
+        .oneshot(
+            req("POST", "/api/login")
+                .header("content-type", "application/json")
+                .body(Body::from(junk))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 413);
+}

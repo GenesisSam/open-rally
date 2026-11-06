@@ -40,16 +40,40 @@ fn is_inline(mime: &str) -> bool {
     m.starts_with("image/") || m.starts_with("video/")
 }
 
+/// RFC 3986 unreserved 문자만 남기고 나머지는 %XX 로 바꾼다 (UTF-8 바이트 단위).
+pub fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
 pub fn disposition(mime: &str, filename: &str) -> String {
     if is_inline(mime) {
-        "inline".to_string()
-    } else {
-        let name: String = filename
-            .chars()
-            .filter(|c| *c != '"' && !c.is_control())
-            .collect();
-        format!("attachment; filename=\"{name}\"")
+        return "inline".to_string();
     }
+    let clean: String = filename
+        .chars()
+        .filter(|c| *c != '"' && !c.is_control())
+        .collect();
+    if clean.is_ascii() {
+        return format!("attachment; filename=\"{clean}\"");
+    }
+    // 비 ASCII 파일명: ASCII 폴백 + RFC 5987 filename* (Safari 가 raw UTF-8 을 깨뜨릴 수 있다)
+    let ascii: String = clean.chars().filter(|c| c.is_ascii()).collect();
+    let (stem, ext) = match ascii.rfind('.') {
+        Some(i) if i > 0 => (&ascii[..i], &ascii[i..]),
+        _ => (ascii.as_str(), ""),
+    };
+    let fallback = if stem.trim().is_empty() { format!("file{ext}") } else { ascii.clone() };
+    format!(
+        "attachment; filename=\"{fallback}\"; filename*=UTF-8''{}",
+        percent_encode(&clean)
+    )
 }
 
 /// `dir` 안에 같은 이름이 있으면 `name-2.ext`, `name-3.ext` ... 를 돌려준다.
@@ -118,6 +142,20 @@ mod tests {
             disposition("application/octet-stream", "a\"b\n.txt"),
             "attachment; filename=\"ab.txt\""
         );
+    }
+
+    #[test]
+    fn disposition_encodes_non_ascii_filenames() {
+        assert_eq!(
+            disposition("application/octet-stream", "배포 도구.dmg"),
+            "attachment; filename=\"file.dmg\"; filename*=UTF-8''%EB%B0%B0%ED%8F%AC%20%EB%8F%84%EA%B5%AC.dmg"
+        );
+        assert_eq!(
+            disposition("text/plain", "한글 memo.txt"),
+            "attachment; filename=\" memo.txt\"; filename*=UTF-8''%ED%95%9C%EA%B8%80%20memo.txt"
+        );
+        assert_eq!(percent_encode("a-b_c.d~e"), "a-b_c.d~e");
+        assert_eq!(percent_encode("#1 x?.txt"), "%231%20x%3F.txt");
     }
 
     #[test]

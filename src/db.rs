@@ -55,7 +55,7 @@ fn err(e: rusqlite::Error) -> String {
 }
 
 pub fn attachment_url(id: &str, filename: &str) -> String {
-    format!("/files/{id}/{filename}")
+    format!("/files/{id}/{}", crate::files::percent_encode(filename))
 }
 
 impl Db {
@@ -258,6 +258,13 @@ mod tests {
         assert_eq!(db.list_posts(None, None, 1).unwrap().len(), 1);
         assert_eq!(db.get_post("01B").unwrap().unwrap().attachments.len(), 1);
         assert!(db.get_post("nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn attachment_url_percent_encodes_filename() {
+        assert_eq!(attachment_url("A1", "x.png"), "/files/A1/x.png");
+        assert_eq!(attachment_url("A1", "#1 notes.txt"), "/files/A1/%231%20notes.txt");
+        assert_eq!(attachment_url("A1", "한.txt"), "/files/A1/%ED%95%9C.txt");
     }
 
     #[test]
