@@ -7,7 +7,39 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div id="app"></div>
+<div id="login" class="overlay hidden">
+  <form id="login-form" autocomplete="off">
+    <h1>open-rally</h1>
+    <input type="password" id="pw" placeholder="비밀번호" autofocus>
+    <button type="submit">들어가기</button>
+    <p id="login-msg" class="msg"></p>
+  </form>
+</div>
+
+<header id="topbar">
+  <span id="dot" class="dot off" title="연결 상태"></span>
+  <strong>open-rally</strong>
+  <span id="host" class="host"></span>
+</header>
+
+<main id="list">
+  <div id="top-sentinel"></div>
+</main>
+
+<div id="drop-hint" class="hidden">여기에 파일을 놓으세요</div>
+
+<footer id="composer">
+  <div id="chips"></div>
+  <textarea id="text" rows="2" placeholder="메시지 입력… (⌘/Ctrl+Enter 로 보내기, Enter 는 줄바꿈)"></textarea>
+  <div class="row">
+    <label class="attach">📎 파일 첨부<input type="file" id="file-input" multiple></label>
+    <div id="progress" class="hidden"><div id="bar"></div></div>
+    <button id="send" type="button" disabled>보내기</button>
+  </div>
+</footer>
+
+<div id="toast" class="hidden"></div>
+
 <script src="/app.js"></script>
 </body>
 </html>

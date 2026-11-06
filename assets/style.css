@@ -1,0 +1,144 @@
+:root {
+  --bg: #f3f4f6;
+  --card: #ffffff;
+  --border: #e5e7eb;
+  --text: #111827;
+  --muted: #6b7280;
+  --code-bg: #f3f4f6;
+  --accent: #111827;
+  --accent-text: #ffffff;
+  --danger: #dc2626;
+  --ok: #22c55e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111318;
+    --card: #1c1f26;
+    --border: #2b2f39;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --code-bg: #0f1115;
+    --accent: #e5e7eb;
+    --accent-text: #111318;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+.hidden { display: none !important; }
+
+/* 상단 바 */
+#topbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+#topbar .host { color: var(--muted); font-size: 12px; margin-left: auto; font-family: ui-monospace, Menlo, monospace; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: #9ca3af; display: inline-block; }
+.dot.on { background: var(--ok); }
+.dot.off { background: #ef4444; }
+
+/* 목록 */
+#list { flex: 1; overflow-y: auto; padding: 12px 16px; scroll-behavior: auto; }
+#top-sentinel { height: 1px; }
+.loading-older { text-align: center; color: var(--muted); font-size: 12px; padding: 6px; }
+.post {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px 10px;
+  margin: 0 auto 10px;
+  max-width: 860px;
+  position: relative;
+}
+.post .meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.post .meta button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 0; }
+.post .meta button:hover { color: var(--danger); }
+.post .text-wrap { position: relative; }
+.post pre {
+  margin: 0; padding: 10px 12px; padding-right: 64px;
+  background: var(--code-bg); border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-all;
+}
+.copy-btn {
+  position: absolute; right: 8px; top: 8px;
+  background: var(--accent); color: var(--accent-text);
+  border: none; border-radius: 6px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+}
+.copy-btn.done { background: var(--ok); color: #fff; }
+.att { margin-top: 8px; }
+.att img { max-height: 320px; max-width: 100%; border-radius: 8px; display: block; cursor: zoom-in; }
+.att video { max-height: 360px; max-width: 100%; border-radius: 8px; display: block; background: #000; }
+.file-card {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--code-bg); border-radius: 8px; padding: 8px 10px;
+}
+.file-card .ico { width: 32px; height: 32px; border-radius: 8px; background: var(--border); display: flex; align-items: center; justify-content: center; font-size: 14px; flex: none; }
+.file-card .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-card .nm small { display: block; color: var(--muted); font-size: 11px; }
+.file-card a { color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 10px; font-size: 12px; white-space: nowrap; }
+.file-card a:hover { background: var(--border); }
+
+/* 입력창 */
+#composer {
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+}
+#composer textarea {
+  width: 100%; resize: vertical; min-height: 56px; max-height: 40vh;
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+  font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px;
+  background: var(--bg); color: var(--text);
+}
+#composer textarea:focus { outline: 2px solid #93c5fd; outline-offset: -1px; }
+#composer .row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+#composer .attach { color: var(--muted); font-size: 13px; cursor: pointer; }
+#composer .attach input { display: none; }
+#send {
+  margin-left: auto;
+  background: var(--accent); color: var(--accent-text);
+  border: none; border-radius: 6px; padding: 6px 16px; font-size: 13px; cursor: pointer;
+}
+#send:disabled { opacity: .4; cursor: default; }
+#chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+#chips:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px 2px 10px; font-size: 12px; max-width: 320px; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip button { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 14px; line-height: 1; padding: 0; }
+#progress { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+#bar { height: 100%; width: 0; background: var(--ok); transition: width .1s; }
+
+/* 드롭 힌트 */
+#drop-hint {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(59,130,246,.15); border: 3px dashed #3b82f6;
+  font-size: 20px; color: #1d4ed8; pointer-events: none;
+}
+
+/* 로그인 */
+.overlay { position: fixed; inset: 0; z-index: 100; background: var(--bg); display: flex; align-items: center; justify-content: center; }
+#login-form { width: 280px; display: flex; flex-direction: column; gap: 10px; }
+#login-form h1 { margin: 0 0 6px; font-size: 20px; text-align: center; }
+#login-form input { font: inherit; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); }
+#login-form button { font: inherit; padding: 10px; border: none; border-radius: 8px; background: var(--accent); color: var(--accent-text); cursor: pointer; }
+#login-form .msg { min-height: 18px; margin: 0; font-size: 12px; color: var(--danger); text-align: center; }
+
+/* 토스트 */
+#toast {
+  position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%);
+  background: var(--accent); color: var(--accent-text);
+  padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 60;
+}

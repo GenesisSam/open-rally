@@ -226,3 +226,17 @@ impl Drop for ServerController {
         }
     }
 }
+
+/// 기본은 localhost + Tailscale 인터페이스. `lan` 이면 모든 인터페이스.
+pub fn bind_plan(lan: bool, port: u16) -> BindPlan {
+    let addrs = if lan {
+        vec![IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)]
+    } else {
+        let mut v = vec![IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)];
+        if let Some(ts) = crate::net::tailscale_ip() {
+            v.push(IpAddr::V4(ts));
+        }
+        v
+    };
+    BindPlan { addrs, port }
+}
