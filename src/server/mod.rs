@@ -4,11 +4,11 @@ pub mod ws;
 
 use std::ops::Deref;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tokio::sync::broadcast;
 
@@ -22,6 +22,7 @@ pub struct Inner {
     pub sessions: SessionStore,
     pub limiter: RateLimiter,
     pub events: broadcast::Sender<String>,
+    ids: Mutex<ulid::Generator>,
 }
 
 #[derive(Clone)]
@@ -36,7 +37,14 @@ impl AppState {
             sessions: SessionStore::new(),
             limiter: RateLimiter::new(5, Duration::from_secs(10)),
             events: ws::event_channel(),
+            ids: Mutex::new(ulid::Generator::new()),
         }))
+    }
+
+    /// 같은 밀리초 안에서도 단조 증가하는 ULID.
+    pub fn next_id(&self) -> String {
+        let mut g = self.ids.lock().unwrap_or_else(|e| e.into_inner());
+        g.generate().unwrap_or_else(|_| ulid::Ulid::generate()).to_string()
     }
 }
 
@@ -54,6 +62,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/style.css", get(routes::style_css))
         .route("/api/login", post(routes::login))
         .route("/api/session", get(routes::session))
+        .route("/api/posts", get(routes::list_posts).post(routes::create_post))
+        .route("/api/posts/{id}", delete(routes::delete_post))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::require_session,
