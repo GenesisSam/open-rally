@@ -1,78 +1,127 @@
 # open-rally
 
-여러 PC 사이에서 값과 파일을 주고받기 위한 로그인 없는 공용 게시판. 개인 Mac 의 메뉴바에서 켜고 끄고, 같은 LAN 이나 Tailscale 안의 PC 가 브라우저로 접속한다.
+> A tiny, password-only shared board for passing secrets and files between your own machines over LAN or Tailscale. One Rust binary, no accounts, no cloud.
 
-## 빌드와 실행
+[![CI](https://github.com/GenesisSam/open-rally/actions/workflows/ci.yml/badge.svg)](https://github.com/GenesisSam/open-rally/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://www.rust-lang.org)
+
+[한국어 README](README.ko.md)
+
+![open-rally board](docs/screenshot.png)
+
+## Why
+
+You manage several PCs. You need to move a `.env`, an API key, a build artifact or a screen recording from one to another. Slack and messengers want a login on every box. AirDrop only works between Apple devices. Scp needs keys and paths.
+
+open-rally is the thing in between: a web page every machine on your private network can open, with one shared password you type once per machine. Paste text, drop files, copy or download on the other side.
+
+## Features
+
+- **Text, images, video and arbitrary files** in one chronological board. Text keeps its whitespace and has a one-click copy button; images preview inline; videos play inline when the browser can decode them; everything else is a download card.
+- **Live updates** over WebSocket. Post on one PC, see it on the others without refreshing.
+- **One shared password**, remembered per browser for 30 days. No accounts.
+- **Single binary.** The web UI is embedded; the only runtime dependency is SQLite, which is bundled.
+- **macOS menubar app** to switch the server on and off. When it is off, nothing listens and nothing is used.
+- **Docker image** for an always-on host (NAS, home server, Docker Desktop).
+- **Private by default.** Binds to the Tailscale interface and localhost only; exposing to the LAN is an explicit toggle. Host/Origin allowlists block CSRF and DNS rebinding from the browsers that use it.
+- **Streaming uploads.** A 1 GB video does not cost 1 GB of RAM.
+
+## Quick start
+
+### macOS menubar app
 
 ```bash
-bash scripts/bundle-app.sh     # dist/open-rally.app 생성 (release 빌드)
-open dist/open-rally.app       # 메뉴바에 아이콘이 뜨고 서버가 켜진다
+git clone https://github.com/GenesisSam/open-rally.git
+cd open-rally
+bash scripts/bundle-app.sh       # cargo build --release + dist/open-rally.app
+open dist/open-rally.app
 ```
 
-메뉴바 아이콘 메뉴에서 **서버 켜기/끄기**, **브라우저에서 열기**, **접속 주소 복사**, **LAN 에도 공개**, **비밀번호 파일 열기**, **데이터 폴더 열기**, **종료** 를 할 수 있다. 채워진 원이 켜짐, 빈 원이 꺼짐이다.
+A filled circle appears in the menu bar and the server starts. The menu shows the address to open from other machines and lets you copy it, open it, toggle the server, expose it to the LAN, or open the password file.
 
-트레이 없이 서버만 띄우려면:
-
-```bash
-cargo run -- --serve          # Ctrl+C 로 종료, --lan 을 붙이면 LAN 에도 공개
-```
-
-상시 서버로 쓰려면 아래 Docker 절을 본다.
-
-## 접속과 비밀번호
-
-다른 PC 에서 메뉴의 Tailscale 주소(`http://100.x.x.x:7777`)를 브라우저로 연다. 처음 한 번 비밀번호를 입력하면 30일 동안 기억한다. 서버를 껐다 켜면 다시 묻는다.
-
-비밀번호는 데이터 폴더의 `config.toml` 에 있다. 첫 실행 때 무작위로 만들어지며, 메뉴의 "비밀번호 파일 열기" 로 바꾼 뒤 서버를 껐다 켜면 반영된다.
-
-```
-~/Library/Application Support/open-rally/
-  config.toml        password = "..."
-  open-rally.db      글 목록 (SQLite)
-  uploads/<글 id>/   첨부 파일
-```
-
-## Docker (상시 서버, 메뉴바 없음)
-
-항상 켜 두는 머신(NAS, 리눅스 서버, 혹은 이 Mac 의 Docker Desktop)에서는 트레이 없이 컨테이너로 돌린다. 이미지는 `--no-default-features` 로 빌드돼 GTK 같은 데스크톱 의존성이 없다.
+### Docker (always on)
 
 ```bash
 docker build -t open-rally .
 docker run -d --name open-rally --restart unless-stopped \
   -v open-rally-data:/data \
-  -e OPEN_RALLY_PASSWORD='비밀번호' \
+  -e OPEN_RALLY_PASSWORD='choose-a-password' \
   -p 100.100.100.100:7777:7777 \
   open-rally
 ```
 
-또는 `docker-compose.yml` 의 비밀번호와 호스트 IP 를 고친 뒤 `docker compose up -d`.
+Replace `100.100.100.100` with the host's Tailscale IP. The container itself listens on all interfaces, so the host-side bind address is what keeps it off the public LAN. A `docker-compose.yml` with the same setup is included.
 
-- 컨테이너 안에는 Tailscale 인터페이스가 없어서 컨테이너는 모든 인터페이스(`--lan`)에 연다. 그래서 **`-p` 의 호스트 IP 를 Tailscale IP 로 적어** 바깥 노출을 막는다. `-p 7777:7777` 처럼 IP 를 빼면 LAN 전체에 열린다.
-- 비밀번호는 `OPEN_RALLY_PASSWORD` 환경변수로 넘긴다. 비우면 `/data/config.toml` 을 쓰거나 만든다.
-- 글과 첨부는 `/data` 볼륨에 남는다.
-
-## 환경변수
-
-| 이름 | 기본값 | 설명 |
-|---|---|---|
-| `OPEN_RALLY_PORT` | `7777` | 리스닝 포트 |
-| `OPEN_RALLY_DATA_DIR` | `~/Library/Application Support/open-rally` | 데이터 폴더 (Docker 에서는 `/data`) |
-| `OPEN_RALLY_PASSWORD` | 없음 | 있으면 config.toml 대신 이 값을 쓴다 |
-
-## 플랫폼
-
-- macOS: 메뉴바 앱 (`scripts/bundle-app.sh`).
-- Linux / Windows: 서버 코드는 그대로 빌드된다. 트레이까지 쓰려면 기본 feature 로 빌드하고(Linux 는 GTK3·libayatana-appindicator 개발 패키지 필요), 서버만 쓰려면 `cargo build --release --no-default-features` 로 빌드하면 `--serve` 가 기본 동작이 된다. macOS 밖에서는 아직 직접 빌드해 보지 않았다.
-
-## 보안 전제
-
-- 기본은 **Tailscale 인터페이스와 localhost 에만** 열린다. 카페 Wi-Fi 에 붙어도 같은 망의 다른 기기에서는 보이지 않는다.
-- "LAN 에도 공개" 를 켜면 모든 인터페이스에 열린다. 이 설정은 저장되지 않고 앱을 다시 켜면 꺼진다.
-- HTTP 평문이다. 비밀번호는 같은 망의 누군가가 우연히 보는 것을 막는 수준이며, 패킷을 보는 사람은 막지 못한다.
-- 브라우저 경유 공격(CSRF, DNS rebinding) 은 Host/Origin 허용 목록으로 막는다. SVG 와 HTML 첨부는 미리보기 없이 다운로드만 된다.
-
-## 개발
+### Server only, any OS
 
 ```bash
-cargo test
+cargo run --release -- --serve          # Ctrl+C to stop; add --lan to expose to the LAN
+cargo build --release --no-default-features   # headless binary without the tray dependencies
 ```
+
+## Using it
+
+1. On another machine, open `http://<tailscale-ip>:7777`.
+2. Enter the password. It is in `config.toml` in the data folder (see below), or in `OPEN_RALLY_PASSWORD` if you set it.
+3. Type or paste text, press **⌘/Ctrl + Enter**. Drag files anywhere on the page, paste an image from the clipboard, or use the attach button.
+4. On the receiving side, hit **Copy** on a text post or **Download** on a file. Posts stay until you delete them.
+
+## Configuration
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `OPEN_RALLY_PORT` | `7777` | Listening port |
+| `OPEN_RALLY_DATA_DIR` | `~/Library/Application Support/open-rally` (macOS), `~/.local/share/open-rally` (Linux), `%APPDATA%\open-rally` (Windows), `/data` (Docker) | Where the database, uploads and `config.toml` live |
+| `OPEN_RALLY_PASSWORD` | unset | If set, used instead of `config.toml` |
+
+The data folder contains `open-rally.db` (SQLite), `uploads/<post-id>/<filename>` and `config.toml` with a single `password = "..."` line. A random password is generated on first run. Change it and restart the server to apply.
+
+## Security model
+
+This is a tool for one person's private network, not a public service. Know what it does and does not do:
+
+- **Network scope.** By default the server binds to `127.0.0.1` and the Tailscale interface (`100.64.0.0/10`). "Expose to LAN" binds to `0.0.0.0` until the app is restarted. There is no mode that exposes it to the internet.
+- **Password.** One shared password, compared in constant time. Five wrong attempts block that IP for 10 seconds. Sessions are random 256-bit tokens kept in memory, so restarting the server logs everyone out.
+- **Transport.** Plain HTTP. The password stops someone on the same network from stumbling in; it does not stop someone capturing packets. That is why Tailscale is the default.
+- **Browser-side attacks.** Every request must carry a `Host` header in the private/Tailscale/`.local`/`.ts.net` allowlist (otherwise `421`), and state-changing requests with an `Origin` header must come from an allowed origin (`403`). This blocks CSRF and DNS-rebinding from other tabs on the client machines.
+- **Attachments.** Filenames are sanitised and never used to build paths from the URL. SVG, HTML and XHTML are always served as downloads with `nosniff`, so an uploaded file cannot run scripts in the board's origin.
+- **Not in scope.** HTTPS, accounts, encryption at rest, rate limiting beyond login, audit logs.
+
+## How it works
+
+```
+┌──────────────── one process ────────────────┐
+│  tao event loop (main thread, menubar)      │
+│      │ start / stop                          │
+│  ServerController ──► tokio runtime         │
+│      axum router: /, /api/*, /files/*, /ws  │
+│      rusqlite  ·  uploads/ on disk          │
+└─────────────────────────────────────────────┘
+```
+
+- `src/server/` — router, middleware (host, origin, session), routes, WebSocket fan-out, `ServerController` (bind, graceful stop with a 5 s cap).
+- `src/db.rs` — two tables, `posts` and `attachments`, ULID keys so ordering is just `ORDER BY id`.
+- `src/files.rs`, `src/net.rs`, `src/auth.rs` — pure functions with unit tests: filename rules, allowlists, sessions and rate limiting.
+- `src/tray.rs` — the menubar app, behind the `tray` cargo feature.
+- `assets/` — the whole frontend: one HTML file, one stylesheet, one script, no build step, no inline scripts (CSP).
+
+The design and the implementation plan that produced this code are in [`docs/superpowers/`](docs/superpowers/).
+
+## Development
+
+```bash
+cargo test                          # unit + API + real-socket WebSocket tests
+cargo test --no-default-features    # same, without the tray
+cargo run -- --serve                # dev server; open http://127.0.0.1:7777
+```
+
+Integration tests run the real router through `tower::oneshot` and a real listener for WebSocket, with a temp directory per test. No mocks.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to set up, what a good PR looks like and the few rules the project keeps (tests first, no new runtime dependencies without a reason, security defaults stay conservative).
+
+## License
+
+[MIT](LICENSE)
