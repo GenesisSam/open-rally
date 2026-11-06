@@ -16,8 +16,13 @@ fn main() {
         }
         return;
     }
-    eprintln!("open-rally: 메뉴바 모드는 아직 없습니다. --serve 로 실행하세요");
-    std::process::exit(2);
+    match config::load() {
+        Ok(cfg) => open_rally::tray::run(cfg),
+        Err(e) => {
+            eprintln!("open-rally: {e}");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn serve(lan: bool) -> Result<(), String> {

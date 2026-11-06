@@ -4,3 +4,4 @@ pub mod db;
 pub mod files;
 pub mod net;
 pub mod server;
+pub mod tray;
